@@ -1,0 +1,436 @@
+---
+title: "BMD: SDM example"
+author: "Julian Oeser"
+date: "2025-05-20"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# SDM Example
+
+This is an R-script demonstrating a SDM modeling workflow. A similar
+workflow may be implemented in SDM-based VREs. The purpose of the script
+is to demonstrate (in a simplified way) what a workflow could look like,
+and I did not check the model for ecological realism (which typically
+should be done!).
+
+This is an annotated version aimed at explaining intermediate processing
+steps and data requirements. A version implementing a Shiny-based GUI
+(e.g., selecting the species of interest with a drop-down menu, etc.)
+can be implemented soon as an additional demo.
+
+For demonstration purposes, I chose to work at a fairly low spatial
+resolution (\~10km raster cell size). When working at higher spatial
+resolutions (e.g., 1km) computational costs can be much larger. On the
+other hand, I did no optimize the code for speed, and some performance
+gains can be made (e.g., via parallelization).
+
+All visualizations are quick-and-dirty and could be optimized for
+display within VREs.
+
+## Preparation
+
+### Working directory
+
+First, let's set the working directory of R to the location of the
+source file (i.e., this script). NOTE: this only works in Rstudio.
+Running the code contained in this script in R requires you to have
+downloaded the folder containing the .csv file containing the example
+occurrence dataset, the R file containing required functions, and the
+folder of .tif files containing raster datasets used in the analysis.
+
+```{r wd}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+### Packages and functions
+
+Second, let's install and load all packages required for this example
+(if missing). A note on packages / dependencies: In the development of
+VREs, we should probably aim to keep dependencies to other packages
+minimal. Yet, some dependencies to well-maintained packages will exist
+(e.g., sf and terra for spatial data processing).
+
+Also, we are sourcing (loading) the script containing the functions I
+wrote and/or adapted for data processing and modeling. In the future, I
+can make these functions available as an R-package via a repository
+(e.g., Git / GitHub).
+
+```{r packages, echo = TRUE, results = 'hide', warning = FALSE, message = FALSE}
+
+
+packages <- c("tidyverse", "sf", "terra","fastshap", "mapview", "randomForest", "blockCV", "parallel")
+
+for (pkg in packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+source("bmd_functions.R")
+
+
+```
+
+### Load data
+
+Next, let's load our example dataset. I downloaded presence occurrence
+records for all bat (Chiroptera) species listed in the annex II of the
+habitats directive (13 species; see here for all annex II species:
+<https://eunis.eea.europa.eu/references/2325/species>). I downloaded the
+dataset via the rgbif package
+(<https://docs.ropensci.org/rgbif/articles/rgbif.html>). The lines of
+commented-out code show the function call with which I downloaded the
+data. To run this, you need to install and setup the rgbif package.
+
+Note: The package also allows you to download occurrence data cubes
+(developed by the B-Cubed project). I tested this feature and noticed
+two things:
+
+1.  The SQL-based downloads are slower than using the `occ_download`
+    function (see here:
+    <https://docs.ropensci.org/rgbif/articles/gbif_sql_downloads.html>)
+
+2.  Although the occurrence cubes have the option to download bias
+    information, this only seems to add the number of target-group taxa
+    counts at the locations of the occurrence data. However, for
+    target-group bias-adjustment in SDMs (see e.g.,
+    <https://doi.org/10.1111/ddi.13442>), we need the full set of
+    locations of all target-group taxa.
+
+In addition to the occurrence data ("bats_europe.csv"), we are also
+loading several raster datasets:
+
+1.  A raster defining land areas (derived from CHELSA:
+    <https://chelsa-climate.org/>)
+
+2.  A raster defining the extent of our area-of-interest (Europe), for
+    which we want to make model predictions.
+
+3.  19 bioclimatic variables from CHELSA (candidate predictors) for
+    current climate conditions (see here for an overview of what the
+    variables indicate: <https://www.worldclim.org/data/bioclim.html>)
+
+4.  The same 19 bioclimatic variables for based on a single climate
+    model and future period (2071-2100)
+
+Note: Even though we want to make predictions for Europe, we need to
+train our models across the full distribution of the species to avoid
+niche truncation (i.e., excluding parts of the environmental niche of a
+species during model training). When projecting models for future
+climate scenarios, we would typically first create an ensemble of all
+available climate models (N=5 for CHELSA), but I kept it simple here.
+
+```{r load_data, , echo = TRUE}
+
+### code to download bat occurrences via the rgbif package
+# GBIF taxon ids of all bats listed in annex II of the habitats directive
+# taxon_ids <- c(2432614, 2432655, 2432621, 2432666, 2432416, 2432470, 2432452, 2432430, 2432414, 2432427, 2432509, 2432582, 2432953)
+#
+# dl <- rgbif::occ_download(
+#   pred_in("taxonKey", taxon_ids),
+#   pred("occurrenceStatus","PRESENT"),
+#   pred_gte("year", 1980),
+#   pred("hasCoordinate", TRUE),
+#   pred("hasGeospatialIssue", FALSE),
+#   format = "SIMPLE_CSV",
+#   pred_or(
+#     pred_lt("coordinateUncertaintyInMeters",1000),
+#     pred_isnull("coordinateUncertaintyInMeters")
+#   ),
+#   pred_in("basisOfRecord",c("HUMAN_OBSERVATION", "PRESERVED_SPECIMEN"))
+# )
+# 
+# occ_download_wait(dl)
+# dat <- occ_download_get(dl) |> occ_download_import()
+
+# load bat occurrence data and select required columns
+presence_full <- read_delim("bats_europe.csv", delim = "\t") %>%
+  select(species, decimalLongitude, decimalLatitude)
+
+landmask <- rast("raster_data/landseamask_agg10.tif")
+landmask_europe <- rast("raster_data/landseamask_europe_agg10.tif")
+
+# convert to spatial sf object
+presence_full_sf <- st_as_sf(presence_full, coords = c("decimalLongitude", "decimalLatitude"), crs = 4326)
+
+# which species are present in the dataset?
+all_species <- unique(presence_full$species)
+
+# plot a small fraction of the data as a check
+presence_full_sf_plot <- sample_frac(presence_full_sf, 0.05)
+mapview(presence_full_sf_plot)
+
+# select an example species for demonstration (<https://en.wikipedia.org/wiki/Greater_horseshoe_bat>)
+example_species <- "Rhinolophus ferrumequinum"
+
+message(paste0("The chosen example species is: " ), example_species)
+
+# keep only one occurence point 
+presence_sf <- presence_full_sf %>%
+  filter(species == example_species) %>%
+  remove_duplicates_per_cell(landmask)
+
+presence_tg_sf <- presence_full_sf %>%
+  filter(species != example_species) %>%
+  remove_duplicates_per_cell(landmask)
+
+# load raster datasets containing the 19 bioclimatic variables from CHELSA
+climate_current <- rast(list.files("raster_data/1981_2010/", "_agg10.tif", full.names = TRUE))
+names(climate_current) <- str_extract(names(climate_current), "bio[0-9]{1,2}")
+climate_future <- rast(list.files("raster_data/2071_2100//", "_agg10.tif", full.names = TRUE))
+names(climate_future) <- str_extract(names(climate_future), "bio[0-9]{1,2}")
+```
+
+## 1. Sample background
+
+In the first processing step, we are creating sample of
+background/pseudo-absence points required for building SDMs. Here, we
+are using one of the most simple approaches to account for sampling bias
+in the occurrence dataset, namely selecting background points among
+locations where target-group taxa have been observed (i.e., taxa with
+similar sampling bias, in our case all other bat species of interest).
+Other approaches could be used, e.g., creating a kernel density grid
+from target-group observations or selecting background points based on
+buffers of the presence records (background thickening:
+<https://doi.org/10.1111/ecog.04503>), which would not require
+information on target-group occurrence.
+
+```{r sample_background}
+
+# test whether we can sample five times as many backgrounds as presences, otherwise use maximum available
+n_samples <- ifelse(nrow(presence_sf)*5 > nrow(presence_tg_sf), nrow(presence_tg_sf), nrow(presence_sf)*5)
+
+background_points <- presence_tg_sf %>% 
+  sample_n(n_samples) %>%
+  dplyr::select(-species)
+
+# plot small fraction of the data as a check
+background_points_plot <- sample_frac(st_as_sf(background_points), 0.05)
+mapview(background_points_plot)
+
+# combine presence and background points
+pb <- bind_rows(
+  presence_sf %>% dplyr::select() %>% mutate(occ = 1),
+  st_sf(background_points) %>% mutate(occ = 0)
+) 
+
+
+
+```
+
+## 2. Extract candidate predictor variables
+
+Next, we are extracting the values of the current climate variables at
+all presence and background locations to generate a data frame used for
+model building.
+
+NOTE: When using dynamic predictor variables that vary at temporal
+resolutions comparable to the occurrence data (e.g., land-cover time
+series), we would need to implement a temporal matching of the data,
+i.e., extract values for the specific time period in which an
+observation was observed.
+
+```{r extract_predictors}
+
+# extract values of candidate predictors (19 bioclimat variables)
+pb_ext <- terra::extract(climate_current, vect(pb), ID =FALSE)
+
+# combine data into model data frame
+model_df <- pb %>%
+  bind_cols(pb_ext) %>%
+  mutate(occ = as.factor(occ)) %>%
+  bind_cols(st_coordinates(.) %>% setNames(c("X", "Y"))) %>%
+  st_set_geometry(NULL) %>%
+  filter(complete.cases(.))
+
+# convert to spatial sf object
+model_sf <- st_as_sf(model_df, coords = c("X", "Y"), crs = 4326)
+
+
+
+```
+
+## 3. Select predictor variables
+
+To reduce data size and aid model interpretability and transferability,
+we are selecting a subset of predictor variables to be used in the SDM
+for the example species. Here, we use a simple automated approach that
+selects uncorrelated variables (r \< 0.7) and retains those with the
+best univariate performance based on AIC values of a logistic
+regression. Other automated approaches could be implemented (e.g., based
+on regularization or boosting approaches:
+<https://doi.org/10.1016/j.ecoinf.2023.102080>) or, for certain VREs,
+predictors could be pre-defined to ensure ecologically meaningful
+variables are used in the models.
+
+```{r select_predictors}
+
+selected_variables <- select_uncorrelated_features(model_df, variable_names = setdiff(names(climate_current), "bio14"), univariate_metric = "aic", cor_cut = 0.7)
+model_sf_select <- model_sf %>% dplyr::select(all_of(c("occ", selected_variables)))
+
+```
+
+## 4. Tune hyperparameters
+
+Many SDM algorithms require an optimization of hyperparameters (model
+tuning) to avoid overfitting (i.e., build overly complex models that do
+not transfer well across space and time). In this example, I will use
+random forests as an example algorithm (specifically, down-sampled
+random forests as discussed here:
+<https://nsojournals.onlinelibrary.wiley.com/doi/10.1111/ecog.05615#citedby-section>).
+The algorithm has several potential tuning parameters, but we are
+focusing on the minimum node size as an example (see:
+<https://www.rdocumentation.org/packages/randomForest/versions/4.7-1.2/topics/randomForest>).
+
+Tuning hyperparameters typically requires testing a set of
+hyperparameter values and assessing their impact on predictive via a
+cross-validation. As a cross-validation strategy, we are here using
+spatial blocking implemented via the blockCV package
+(<https://github.com/rvalavi/blockCV>). Spatial or environmental
+blocking are typically the most useful approaches in SDMs, since random
+cross-validation is typically over-optimistic and is prone to select
+models that overfit the data (see: <https://doi.org/10.1111/ecog.02881>)
+
+For large data size and/or complex algorithms, this processing step can
+involve fairly large computational costs. There is the potential for
+more efficient tuning by more complex tuning approaches than grid search
+(e.g., bayesian optimization).
+
+```{r tune_model, message=FALSE}
+
+
+# create spatial folds based on hexagons via the blockCV-package
+model_df_folds <- folds_spatial(model_sf_select, k = 5) 
+
+# create a regular grid for tuning the nodesize parameter
+tune_grid <- tibble(nodesize = round(seq(1, nrow(model_df_folds)*0.05, length.out = 10)))
+
+# run grid search / cross valiodation
+tunings_results_rf <- tune_model(fit_rf, 
+                                 predictors = selected_variables, 
+                                 pred_fun = pred_rf,
+                                 model_df = model_df_folds, 
+                                 tune_grid = tune_grid)
+
+
+# select the model with the highest area under the ROC curve (AUC) value (other performance metrics could be used in addtion or instead)
+selected_run <- which.max(tunings_results_rf$auc)
+
+# plot performance across minimum node size values
+ggplot(tunings_results_rf, aes(nodesize, auc)) +
+  geom_point() +
+  geom_line(linetype = 2) +
+  theme_bw() +
+  xlab("Minimum node size") +
+  ylab("AUC")
+
+```
+
+## 5. Fit full model
+
+This step fits the final models with the selected hyperparameter(s)
+based on all available data for the example species.
+
+```{r fit_model}
+
+nodesize <- tune_grid$nodesize[selected_run]
+m_rf <- fit_rf(model_sf_select, selected_variables, ntree = 500, nodesize = nodesize)
+
+
+
+```
+
+## 6. Predict model
+
+Next, we generate predictions across our area of interest (Europe). In
+addition, to identify areas in which our model needs extrapolate (i.e.,
+predict to areas with values outside the training ranges or new
+combinations of variable values), we calculate ExDet scores (see:
+<https://doi.org/10.1111/ddi.12209>). These can help highlight areas in
+which our model predictions are more uncertain.
+
+Note: this task will typically be the on being computationally most
+expensive in the modeling workflow, particularly when we use finer
+spatial resolutions.
+
+```{r predict_model}
+
+
+# crop and mask the selected predictor variables to the area of interest for which we want to make model predictions
+predictors_europe_current <- crop(mask(subset(climate_current, selected_variables), landmask), landmask_europe)
+predictors_europe_future <- crop(mask(subset(climate_future, selected_variables), landmask), landmask_europe)
+
+# create extrapolation surfaces to identify areas in which the model predictions are less certain
+ref_df <- model_df %>% dplyr::select(all_of(selected_variables))
+extrapolation <- extrapolation_exdet(predictors_europe_future, ref_df)
+
+# plot areas in with type-I novelty (variables outside the training range). See the paper linked above for details on the interpretation of outputs.
+plot(extrapolation[["nt1"]] < 0)
+
+
+# predict models across the area of interest
+pred_current_rf <- terra::predict(predictors_europe_current, 
+                                  model = m_rf, fun = pred_rf)
+
+pred_future_rf <- terra::predict(predictors_europe_future, 
+                                  model = m_rf, fun = pred_rf)
+
+
+# plot predictions and their differences
+plot(pred_current_rf)
+plot(pred_future_rf)
+plot(pred_future_rf-pred_current_rf, col = map.pal("differences"))
+
+
+```
+
+## 7. Attribute changes
+
+As a final step, we may want to attribute predicted changes to the
+predictor variables in the model. For this, I am applying SHAP / Shapley
+values (see:
+<https://christophm.github.io/interpretable-ml-book/shapley.html>). This
+is a model-agnostic approach (i.e., can be applied to any algorithm) for
+identifying the contribution of predictors in a predictive model.
+
+Unfortunately, calculating SHAP values is computationally expensive. For
+demonstration purposes, we therefore down-scale the predictor variables
+by a factor of 10 before running attribution. The computations are run
+using the fastshap package (<https://bgreenwell.github.io/fastshap/>).
+Note that the script uses parallel processing across 10 cores
+here, you can reduce the number of cores or set them to 1 to run
+everything sequentially.
+
+The output can be interpreted as the marginal contribution of each
+predictor variable when changing the prediction dataset from the current
+to the future climate (i.e., how does each variable in the model
+contribute to changes in environmental suitability for the target
+species?).
+
+```{r attribute}
+
+
+attribution_results_raster <- attribution_raster(m_rf, 
+                                                 aggregate(predictors_europe_current, 10), 
+                                                 aggregate(predictors_europe_future, 10),
+                                                 pred_fun = pred_rf, nsim = 1, ncores = 10)
+plot(attribution_results_raster, col = map.pal("differences"))
+
+
+```
+
+## Session Info
+
+```{r session_info}
+
+sessioninfo::session_info()
+
+```
