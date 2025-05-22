@@ -301,10 +301,10 @@ cross-validation. As a cross-validation strategy, we are here using
 spatial blocking implemented via the blockCV package
 (<https://github.com/rvalavi/blockCV>). Spatial or environmental
 blocking are typically the most useful approaches in SDMs, since random
-cross-validation is typically over-optimistic and is prone to select
+cross-validation is over-optimistic and  prone to select
 models that overfit the data (see: <https://doi.org/10.1111/ecog.02881>)
 
-For large data size and/or complex algorithms, this processing step can
+For large data sizes and/or complex algorithms, this processing step can
 involve fairly large computational costs. There is the potential for
 more efficient tuning by more complex tuning approaches than grid search
 (e.g., bayesian optimization).
@@ -362,8 +362,8 @@ combinations of variable values), we calculate ExDet scores (see:
 <https://doi.org/10.1111/ddi.12209>). These can help highlight areas in
 which our model predictions are more uncertain.
 
-Note: this task will typically be the on being computationally most
-expensive in the modeling workflow, particularly when we use finer
+Note: The prediction of models will typically often be one of the computationally most
+expensive tasks in the modeling workflow, particularly when we use finer
 spatial resolutions.
 
 ```{r predict_model}
