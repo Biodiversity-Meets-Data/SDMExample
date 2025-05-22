@@ -131,6 +131,8 @@ species during model training). When projecting models for future
 climate scenarios, we would typically first create an ensemble of all
 available climate models (N=5 for CHELSA), but I kept it simple here.
 
+As an example species, I chose *Rhinolophus ferrumequinum* (<https://en.wikipedia.org/wiki/Greater_horseshoe_bat>)
+
 ```{r load_data, , echo = TRUE}
 
 ### code to download bat occurrences via the rgbif package
@@ -171,12 +173,12 @@ all_species <- unique(presence_full$species)
 presence_full_sf_plot <- sample_frac(presence_full_sf, 0.05)
 mapview(presence_full_sf_plot)
 
-# select an example species for demonstration (<https://en.wikipedia.org/wiki/Greater_horseshoe_bat>)
+# select an example species for demonstration
 example_species <- "Rhinolophus ferrumequinum"
 
 message(paste0("The chosen example species is: " ), example_species)
 
-# keep only one occurence point 
+# keep only one occurence point per raster grid cell in the presence and background datasets
 presence_sf <- presence_full_sf %>%
   filter(species == example_species) %>%
   remove_duplicates_per_cell(landmask)
