@@ -2,10 +2,13 @@
 title: "BMD: SDM example"
 author: "Julian Oeser"
 date: "2025-05-20"
-output: html_document
+output: 
+   html_document:
+      keep_md: yes
 editor_options: 
   markdown: 
     wrap: 72
+always_allow_html: true
 ---
 
 ```{r setup, include=FALSE}
@@ -418,8 +421,8 @@ species?).
 ```{r attribute}
 
 
-attribution_results_raster <- attribution_raster(m_rf, 
-                                                 aggregate(predictors_europe_current, 10), 
+attribution_results_raster <- attribution_raster(m_rf,
+                                                 aggregate(predictors_europe_current, 10),
                                                  aggregate(predictors_europe_future, 10),
                                                  pred_fun = pred_rf, nsim = 1, ncores = 10)
 plot(attribution_results_raster, col = map.pal("differences"))
@@ -429,8 +432,8 @@ plot(attribution_results_raster, col = map.pal("differences"))
 
 ## Session Info
 
-```{r session_info}
+```{r session_info, warning=FALSE}
 
-sessioninfo::session_info()
+sessionInfo()
 
 ```
