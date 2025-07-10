@@ -1,6 +1,4 @@
-<a target="_blank" href="https://colab.research.google.com/github/https://colab.research.google.com/drive/1yM8qpk7HHe6JSIZeliVO83njR4njbdca?usp=sharing">
-  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
-</a>
+A Google Colab version of the notebook is available here: https://colab.research.google.com/drive/1yM8qpk7HHe6JSIZeliVO83njR4njbdca?usp=sharing
 
 This is an annotated example of a typical SDM workflow in R. A similar workflow may be used in the SDM-based VREs. 
 You can view a preview of the document here: https://github.com/Biodiversity-Meets-Data/SDMExample/blob/master/sdm_example.md
