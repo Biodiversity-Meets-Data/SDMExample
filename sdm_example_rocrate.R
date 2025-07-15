@@ -1,5 +1,3 @@
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-
 ### 0. PACKAGES AND INPUT
 
 options(repos = c(RSPM = "https://packagemanager.posit.co/cran/latest"))
