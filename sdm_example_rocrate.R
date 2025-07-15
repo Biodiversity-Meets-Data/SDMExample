@@ -1,7 +1,7 @@
 ### 0. PACKAGES AND INPUT
 
 options(repos = c(RSPM = "https://packagemanager.posit.co/cran/latest"))
-packages <- c("dplyr", "sf", "terra","leaflet", "randomForest", "blockCV", "predicts", "devtools", "htmlwidgets")
+packages <- c("dplyr","readr", "sf", "terra","leaflet", "randomForest", "blockCV", "predicts", "devtools", "htmlwidgets")
 
 for (pkg in packages) {
   if (!require(pkg, character.only = TRUE)) {
