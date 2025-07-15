@@ -297,7 +297,7 @@ select_uncorrelated_features <- function(model_df, variable_names, univariate_me
 
 folds_spatial <- function(x, ...){
 
-  folds <- blockCV::cv_spatial(x, column = "occ", progress = FALSE, report = FALSE, ...)
+  folds <- blockCV::cv_spatial(x, column = "occ", progress = FALSE, report = FALSE, plot = FALSE, ...)
 
   x <- x %>%
     mutate(fold = folds$folds_ids)
@@ -348,7 +348,7 @@ tune_model <- function(fitfun, predictors, pred_fun, model_df, tune_grid, ncores
       preds_i <- pred_fun(m, test_dat_i)
 
       eval <- predicts::pa_evaluate(preds_i[test_dat_i$occ == 1],
-                            preds_i[test_dat_i$occ == 0])
+                                    preds_i[test_dat_i$occ == 0])
 
 
       tibble(fold = fold_i) %>%
